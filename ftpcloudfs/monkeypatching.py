@@ -57,6 +57,17 @@ class MyFTPHandler(FTPHandler):
             msg = md5_checksum.upper()
             self.respond('251 "%s" %s' % (line.replace('"', '""'), msg))
 
+    def ftp_OPTS(self, line):
+        """
+        OPTS ON UTF8 support
+
+        Workaround for Windows Explorer FTP client, see: https://github.com/chmouel/ftp-cloudfs/issues/50
+        """
+        if line and line.upper() == "UTF8 ON":
+            self.respond('200 OPTS command UTF8 ON ok.')
+        else:
+            FTPHandler.ftp_OPTS(self, line)
+
     def handle(self):
         """Track the ip and check max cons per ip (if needed)"""
         if self.max_cons_per_ip and self.remote_ip and self.shared_ip_map != None:
