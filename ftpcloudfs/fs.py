@@ -71,7 +71,7 @@ class ProxyConnection(Connection):
     def get_auth(self):
         """Perform the authentication using a token cache if memcache is available"""
         if self.memcache:
-            key = "tk%s" % md5("%s%s" % (self.authurl, self.user)).hexdigest()
+            key = "tk%s" % md5("%s%s%s" % (self.authurl, self.user, self.key)).hexdigest()
             cache = self.memcache.get(key)
             if not cache:
                 logging.debug("token cache miss, key=%s" % key)
