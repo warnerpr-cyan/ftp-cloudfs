@@ -443,6 +443,39 @@ class ObjectStorageFSTest(unittest.TestCase):
 
         self.cnx.remove("testfile.txt")
 
+    def test_large_file_support(self):
+        ''' auto-split of large files '''
+        size = 1024**2
+        part_size = 64*1024
+        fd = self.cnx.open("bigfile.txt", "wb")
+        fd.split_size = part_size
+        for part in xrange(size/4096):
+            fd.write('0'*4096)
+        fd.close()
+        self.assertEqual(self.cnx.listdir("."), ["bigfile.txt", "bigfile.txt.part"])
+        self.assertEqual(self.cnx.getsize("bigfile.txt"), size)
+        self.assertEqual(len(self.cnx.listdir("bigfile.txt.part/")), size/part_size)
+        self.assertEqual(self.cnx.getsize("bigfile.txt.part/000000"), part_size)
+        self.cnx.remove("bigfile.txt")
+        for i in range(size/part_size):
+            self.cnx.remove("bigfile.txt.part/%.6d" % i)
+
+    def test_large_file_support_big_chunk(self):
+        ''' auto-split of large files '''
+        size = 1024**2
+        part_size = 64*1024
+        fd = self.cnx.open("bigfile.txt", "wb")
+        fd.split_size = part_size
+        fd.write('0'*size)
+        fd.close()
+        self.assertEqual(self.cnx.listdir("."), ["bigfile.txt", "bigfile.txt.part"])
+        self.assertEqual(self.cnx.getsize("bigfile.txt"), size)
+        self.assertEqual(len(self.cnx.listdir("bigfile.txt.part/")), size/part_size)
+        self.assertEqual(self.cnx.getsize("bigfile.txt.part/000000"), part_size)
+        self.cnx.remove("bigfile.txt")
+        for i in range(size/part_size):
+            self.cnx.remove("bigfile.txt.part/%.6d" % i)
+
     def tearDown(self):
         # Delete eveything from the container using the API
         _, fails = self.conn.get_container(self.container)
