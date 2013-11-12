@@ -181,30 +181,42 @@ class ObjectStorageFD(object):
         if 'r' in self.mode:
             raise IOSError(EPERM, "File is opened for read")
 
-        self.obj.send_chunk(data)
-
         # large file support
         if self.split_size:
-            self.part_size += len(data)
-            if self.part_size > self.split_size:
-                logging.debug("current size is %r, split_file is %r" % (self.part_size, self.split_size))
-                self.obj.finish_chunk()
-                # make it the first part
-                if self.part == 0:
-                    headers = { 'x-copy-from': "/%s/%s" % (self.container, self.name) }
-                    logging.debug("copying first part %r" % headers)
-                    self.conn.put_object(self.container, self.part_name, headers=headers, contents=None)
-                    # setup the manifest
-                    headers = { 'x-object-manifest': "%s/%s" % (self.container, self.part_base_name) }
-                    logging.debug("creating manifest %r" % headers)
-                    self.conn.put_object(self.container, self.name, headers=headers, contents=None)
-                self.part_size = 0
-                self.part += 1
-                self.obj = ChunkObject(self.conn, self.container, self.part_name, content_type=self.content_type)
+            # data can be of any size, so we need to split it in split_size chunks
+            offs = 0
+            while offs < len(data):
+                if self.part_size + len(data) > self.split_size:
+                    current_size = self.split_size-self.part_size
+                else:
+                    current_size = len(data)
+                self.part_size += current_size
+                if not self.obj:
+                    self.obj = ChunkObject(self.conn, self.container, self.part_name, content_type=self.content_type)
+                self.obj.send_chunk(data[offs:offs+current_size])
+                offs += current_size
+                if self.part_size == self.split_size:
+                    logging.debug("current size is %r, split_file is %r" % (self.part_size, self.split_size))
+                    self.obj.finish_chunk()
+                    # this obj is not valid anymore, will create a new one if a new part is required
+                    self.obj = None
+                    # make it the first part
+                    if self.part == 0:
+                        headers = { 'x-copy-from': "/%s/%s" % (self.container, self.name) }
+                        logging.debug("copying first part %r" % headers)
+                        self.conn.put_object(self.container, self.part_name, headers=headers, contents=None)
+                        # setup the manifest
+                        headers = { 'x-object-manifest': "%s/%s" % (self.container, self.part_base_name) }
+                        logging.debug("creating manifest %r" % headers)
+                        self.conn.put_object(self.container, self.name, headers=headers, contents=None)
+                    self.part_size = 0
+                    self.part += 1
+        else:
+            self.obj.send_chunk(data)
 
     def close(self):
         """Close the object and finish the data transfer."""
-        if 'r' in self.mode:
+        if 'r' in self.mode or self.obj is None:
             return
         self.obj.finish_chunk()
 
