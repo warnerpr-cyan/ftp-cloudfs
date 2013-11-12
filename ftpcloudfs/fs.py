@@ -186,10 +186,11 @@ class ObjectStorageFD(object):
             # data can be of any size, so we need to split it in split_size chunks
             offs = 0
             while offs < len(data):
-                if self.part_size + len(data) > self.split_size:
+                if self.part_size + len(data) - offs > self.split_size:
                     current_size = self.split_size-self.part_size
+                    logging.debug("data is to large (%r), using %s" % (len(data), current_size))
                 else:
-                    current_size = len(data)
+                    current_size = len(data)-offs
                 self.part_size += current_size
                 if not self.obj:
                     self.obj = ChunkObject(self.conn, self.container, self.part_name, content_type=self.content_type)
