@@ -242,7 +242,7 @@ class Main(object):
 
         try:
             # store bytes
-            ObjectStorageFD.split_size = int(self.config.get('ftpcloudfs', 'split-large-files'))*1024**2
+            ObjectStorageFD.split_size = int(self.config.get('ftpcloudfs', 'split-large-files'))*10**6
         except ValueError, errmsg:
             sys.exit('Split large files error: %s' % errmsg)
 
