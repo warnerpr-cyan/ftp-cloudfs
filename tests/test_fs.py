@@ -454,13 +454,17 @@ class ObjectStorageFSTest(unittest.TestCase):
         part_size = 64*1024
         fd = self.cnx.open("bigfile.txt", "wb")
         fd.split_size = part_size
+        content = ''
         for part in xrange(size/4096):
-            fd.write('0'*4096)
+            content += chr(part)*4096
+            fd.write(chr(part)*4096)
         fd.close()
         self.assertEqual(self.cnx.listdir("."), ["bigfile.txt", "bigfile.txt.part"])
         self.assertEqual(self.cnx.getsize("bigfile.txt"), size)
         self.assertEqual(len(self.cnx.listdir("bigfile.txt.part/")), size/part_size)
         self.assertEqual(self.cnx.getsize("bigfile.txt.part/000000"), part_size)
+        stored_content = self.read_file("/%s/bigfile.txt" % self.container)
+        self.assertEqual(stored_content, content)
         self.cnx.remove("bigfile.txt")
         for i in range(size/part_size):
             self.cnx.remove("bigfile.txt.part/%.6d" % i)
@@ -482,7 +486,7 @@ class ObjectStorageFSTest(unittest.TestCase):
             self.cnx.remove("bigfile.txt.part/%.6d" % i)
 
     def test_large_file_support_content(self):
-        ''' auto-split of large files, verify content '''
+        ''' auto-split of large files, reminder last part '''
         size = 1024**2
         part_size = 64*1000 # size % part_size != 0
         content = ''
