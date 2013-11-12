@@ -131,6 +131,9 @@ def parse_fspath(path):
 
 class ObjectStorageFD(object):
     """File alike object attached to the Object Storage."""
+
+    split_size = 0
+
     def __init__(self, cffs, container, obj, mode):
         self.cffs = cffs
         self.container = container
@@ -138,7 +141,10 @@ class ObjectStorageFD(object):
         self.mode = mode
         self.closed = False
         self.total_size = 0
+        self.part_size = 0
+        self.part = 0
         self.headers = dict()
+        self.content_type = mimetypes.guess_type(self.name)[0]
 
         self.obj = None
 
@@ -155,7 +161,15 @@ class ObjectStorageFD(object):
             logging.debug("read fd %r" % self.name)
         else: # write
             logging.debug("write fd %r" % self.name)
-            self.obj = ChunkObject(self.conn, self.container, self.name, content_type=mimetypes.guess_type(self.name)[0])
+            self.obj = ChunkObject(self.conn, self.container, self.name, content_type=self.content_type)
+
+    @property
+    def part_base_name(self):
+        return u"%s.part" % self.name
+
+    @property
+    def part_name(self):
+        return u"%s/%.6d" % (self.part_base_name, self.part)
 
     @property
     def conn(self):
@@ -166,7 +180,27 @@ class ObjectStorageFD(object):
         """Write data to the object."""
         if 'r' in self.mode:
             raise IOSError(EPERM, "File is opened for read")
+
         self.obj.send_chunk(data)
+
+        # large file support
+        if self.split_size:
+            self.part_size += len(data)
+            if self.part_size > self.split_size:
+                logging.debug("current size is %r, split_file is %r" % (self.part_size, self.split_size))
+                self.obj.finish_chunk()
+                # make it the first part
+                if self.part == 0:
+                    headers = { 'x-copy-from': "/%s/%s" % (self.container, self.name) }
+                    logging.debug("copying first part %r" % headers)
+                    self.conn.put_object(self.container, self.part_name, headers=headers, contents=None)
+                    # setup the manifest
+                    headers = { 'x-object-manifest': "%s/%s" % (self.container, self.part_base_name) }
+                    logging.debug("creating manifest %r" % headers)
+                    self.conn.put_object(self.container, self.name, headers=headers, contents=None)
+                self.part_size = 0
+                self.part += 1
+                self.obj = ChunkObject(self.conn, self.container, self.part_name, content_type=self.content_type)
 
     def close(self):
         """Close the object and finish the data transfer."""
