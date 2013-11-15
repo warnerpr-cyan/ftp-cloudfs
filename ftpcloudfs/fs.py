@@ -7,6 +7,7 @@ Authors: Chmouel Boudjnah <chmouel@chmouel.com>
 """
 
 import os
+import sys
 import time
 import mimetypes
 import stat
@@ -191,11 +192,19 @@ class ObjectStorageFD(object):
             conn = ProxyConnection(None, preauthurl=conn.url, preauthtoken=conn.token)
             headers = { 'x-copy-from': "/%s/%s" % (container, name) }
             logging.debug("copying first part %r/%r, %r" % (container, part_name, headers))
-            conn.put_object(container, part_name, headers=headers, contents=None)
+            try:
+                conn.put_object(container, part_name, headers=headers, contents=None)
+            except ClientException as ex:
+                logging.error("Failed to copy %s: %s" % (name, ex.http_reason))
+                sys.exit(1)
             # setup the manifest
             headers = { 'x-object-manifest': "%s/%s" % (container, part_base_name) }
             logging.debug("creating manifest %r/%r, %r" % (container, name, headers))
-            conn.put_object(container, name, headers=headers, contents=None)
+            try:
+                conn.put_object(container, name, headers=headers, contents=None)
+            except ClientException as ex:
+                logging.error("Failed to store the manifest %s: %s" % (name, ex.http_reason))
+                sys.exit(1)
             logging.debug("copy task done")
         self.pending_copy_task = multiprocessing.Process(target=copy_task,
                                                          args=(self.conn,
@@ -207,6 +216,7 @@ class ObjectStorageFD(object):
                                                          )
         self.pending_copy_task.start()
 
+    @translate_objectstorage_error
     def write(self, data):
         """Write data to the object."""
         if 'r' in self.mode:
@@ -240,6 +250,7 @@ class ObjectStorageFD(object):
         else:
             self.obj.send_chunk(data)
 
+    @translate_objectstorage_error
     def close(self):
         """Close the object and finish the data transfer."""
         if 'r' in self.mode:
@@ -248,6 +259,8 @@ class ObjectStorageFD(object):
             logging.debug("waiting for a pending copy task...")
             self.pending_copy_task.join()
             logging.debug("wait is over")
+            if self.pending_copy_task.exitcode != 0:
+                raise IOSError(EIO, 'Failed to store the file')
         if self.obj is not None:
             self.obj.finish_chunk()
 
