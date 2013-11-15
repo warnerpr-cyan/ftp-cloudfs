@@ -180,7 +180,7 @@ class ObjectStorageFD(object):
 
     def _start_copy_task(self):
         """
-        Copy the first part of a multi-part file to it's final location and create
+        Copy the first part of a multi-part file to its final location and create
         the manifest file.
 
         This happens in the background, pending_copy_task must be cleaned up at
