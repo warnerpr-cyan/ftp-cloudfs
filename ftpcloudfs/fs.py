@@ -19,6 +19,7 @@ import posixpath
 from utils import smart_str
 from functools import wraps
 import memcache
+import multiprocessing
 try:
     from hashlib import md5
 except ImportError:
@@ -145,6 +146,7 @@ class ObjectStorageFD(object):
         self.part = 0
         self.headers = dict()
         self.content_type = mimetypes.guess_type(self.name)[0]
+        self.pending_copy_task = None
 
         self.obj = None
 
@@ -176,6 +178,35 @@ class ObjectStorageFD(object):
         """Connection to the storage."""
         return self.cffs.conn
 
+    def _start_copy_task(self):
+        """
+        Copy the first part of a multi-part file to it's final location and create
+        the manifest file.
+
+        This happens in the background, pending_copy_task must be cleaned up at
+        the end.
+        """
+        def copy_task(conn, container, name, part_name, part_base_name):
+            # open a new connection
+            conn = ProxyConnection(None, preauthurl=conn.url, preauthtoken=conn.token)
+            headers = { 'x-copy-from': "/%s/%s" % (container, name) }
+            logging.debug("copying first part %r/%r, %r" % (container, part_name, headers))
+            conn.put_object(container, part_name, headers=headers, contents=None)
+            # setup the manifest
+            headers = { 'x-object-manifest': "%s/%s" % (container, part_base_name) }
+            logging.debug("creating manifest %r/%r, %r" % (container, name, headers))
+            conn.put_object(container, name, headers=headers, contents=None)
+            logging.debug("copy task done")
+        self.pending_copy_task = multiprocessing.Process(target=copy_task,
+                                                         args=(self.conn,
+                                                               self.container,
+                                                               self.name,
+                                                               self.part_name,
+                                                               self.part_base_name,
+                                                               ),
+                                                         )
+        self.pending_copy_task.start()
+
     def write(self, data):
         """Write data to the object."""
         if 'r' in self.mode:
@@ -203,13 +234,7 @@ class ObjectStorageFD(object):
                     self.obj = None
                     # make it the first part
                     if self.part == 0:
-                        headers = { 'x-copy-from': "/%s/%s" % (self.container, self.name) }
-                        logging.debug("copying first part %r" % headers)
-                        self.conn.put_object(self.container, self.part_name, headers=headers, contents=None)
-                        # setup the manifest
-                        headers = { 'x-object-manifest': "%s/%s" % (self.container, self.part_base_name) }
-                        logging.debug("creating manifest %r" % headers)
-                        self.conn.put_object(self.container, self.name, headers=headers, contents=None)
+                        self._start_copy_task()
                     self.part_size = 0
                     self.part += 1
         else:
@@ -217,9 +242,14 @@ class ObjectStorageFD(object):
 
     def close(self):
         """Close the object and finish the data transfer."""
-        if 'r' in self.mode or self.obj is None:
+        if 'r' in self.mode:
             return
-        self.obj.finish_chunk()
+        if self.pending_copy_task:
+            logging.debug("waiting for a pending copy task...")
+            self.pending_copy_task.join()
+            logging.debug("wait is over")
+        if self.obj is not None:
+            self.obj.finish_chunk()
 
     def read(self, size=65536):
         """
