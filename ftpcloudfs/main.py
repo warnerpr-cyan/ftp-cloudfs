@@ -82,6 +82,7 @@ class Main(object):
         config = RawConfigParser({'banner': default_banner,
                                   'port': default_port,
                                   'bind-address': default_address,
+                                  'passive-ports': None,
                                   'workers': None,
                                   'memcache': None,
                                   'max-cons-per-ip': '0',
@@ -108,7 +109,7 @@ class Main(object):
 
         self.config = config
 
-    def parse_arguments(self):
+    def parse_arguments(self, args=None):
         """Parse command line options"""
         parser = OptionParser(version="%prog " + version)
         parser.add_option('-p', '--port',
@@ -124,6 +125,14 @@ class Main(object):
                           default=self.config.get('ftpcloudfs', 'bind-address'),
                           help="Address to bind (default: %s)" % \
                               (default_address))
+
+        parser.add_option('--passive-ports',
+                          type="str",
+                          dest="passive_ports",
+                          default=None,
+                          help="the range of TCP ports to use for passive " \
+                               "connections (e.g. --passive-ports 8000-9000) " \
+                               "(default: from system)")
 
         parser.add_option('-a', '--auth-url',
                           type="str",
@@ -215,7 +224,9 @@ class Main(object):
                           default=self.config.get('ftpcloudfs', 'keystone-endpoint-type'),
                           help="Endpoint type to be used in auth 2.0 (default: %s)" % default_ks_endpoint_type)
 
-        (options, _) = parser.parse_args()
+        if args is None:
+            args = sys.argv[1:]
+        (options, _) = parser.parse_args(args=args)
 
         if options.keystone:
             try:
@@ -258,10 +269,13 @@ class Main(object):
         except ValueError, errmsg:
             sys.exit('Max connections per IP error: %s' % errmsg)
 
-        ftpd = pyftpdlib.servers.MultiprocessFTPServer((self.options.bind_address,
-                                                        self.options.port),
-                                                       MyFTPHandler,
-                                                       )
+        ftp_args = [self.options.bind_address,
+                    self.options.port]
+
+        if self.options.passive_ports:
+            ftp_args.append(self.options.passive_ports)
+
+        ftpd = pyftpdlib.servers.MultiprocessFTPServer(tuple(ftp_args), MyFTPHandler)
 
         # set it to unlimited, we use our own checks with a shared dict
         ftpd.max_cons_per_ip = 0
